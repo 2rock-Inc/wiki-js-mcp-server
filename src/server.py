@@ -138,7 +138,7 @@ class WikiJSClient:
     """Async Wiki.js GraphQL client with retry logic."""
 
     def __init__(self):
-        self.client = httpx.AsyncClient(timeout=30.0, headers=settings.headers)
+        self.client = httpx.AsyncClient(timeout=120.0, headers=settings.headers)
 
     async def __aenter__(self):
         return self
@@ -146,7 +146,7 @@ class WikiJSClient:
     async def __aexit__(self, *_):
         await self.client.aclose()
 
-    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=8))
+    @retry(stop=stop_after_attempt(2), wait=wait_exponential(multiplier=1, min=2, max=8))
     async def query(self, gql: str, variables: Dict = None) -> Dict:
         payload: Dict[str, Any] = {"query": gql}
         if variables:
