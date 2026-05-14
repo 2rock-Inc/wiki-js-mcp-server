@@ -3,7 +3,7 @@
 > A comprehensive **Model Context Protocol (MCP) server** for Wiki.js — 24 tools, dual transport (stdio + HTTP/SSE), built for production self-hosted infrastructure.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B%20%7C%203.14-blue)](https://www.python.org/)
 [![FastMCP](https://img.shields.io/badge/FastMCP-3.x-green)](https://gofastmcp.com)
 [![Wiki.js](https://img.shields.io/badge/Wiki.js-2.x-blueviolet)](https://js.wiki/)
 [![Docker](https://img.shields.io/badge/Docker-hub2rock%2Fwiki--js--mcp--server-blue?logo=docker)](https://hub.docker.com/r/hub2rock/wiki-js-mcp-server)
@@ -30,7 +30,7 @@ Once connected, you can ask Claude to:
 
 ### Prerequisites
 
-- Python **3.11+** (3.12 recommended)
+- Python **3.11+** — compatible up to **3.14** (3.12 recommended)
 - A running [Wiki.js](https://js.wiki/) instance (v2.x)
 - A Wiki.js **API key** with Full Access (see [Getting an API key](#-getting-a-wikijs-api-key))
 
