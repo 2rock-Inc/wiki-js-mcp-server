@@ -1372,7 +1372,7 @@ async def run_http() -> None:
     """Run as HTTP server (Docker/remote)."""
     settings.validate_config()
     logger.info(f"wiki-js-mcp-server HTTP mode — {settings.HTTP_HOST}:{settings.HTTP_PORT}")
-    app = mcp.streamable_http_app()
+    app = mcp.http_app()
     config = uvicorn.Config(app=app, host=settings.HTTP_HOST, port=settings.HTTP_PORT, log_level="info")
     server = uvicorn.Server(config)
     await server.serve()
