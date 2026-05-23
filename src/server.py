@@ -27,7 +27,7 @@ from pydantic_settings import BaseSettings
 from slugify import slugify
 from sqlalchemy import Column, DateTime, Integer, String, create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
-from tenacity import retry, stop_after_attempt, wait_exponential
+from tenacity import before_sleep_log, retry, stop_after_attempt, wait_exponential
 
 load_dotenv()
 
@@ -146,7 +146,7 @@ class WikiJSClient:
     async def __aexit__(self, *_):
         await self.client.aclose()
 
-    @retry(stop=stop_after_attempt(2), wait=wait_exponential(multiplier=1, min=2, max=8))
+    @retry(stop=stop_after_attempt(2), wait=wait_exponential(multiplier=1, min=2, max=8), reraise=True, before_sleep=before_sleep_log(logger, logging.WARNING))
     async def query(self, gql: str, variables: Dict = None) -> Dict:
         payload: Dict[str, Any] = {"query": gql}
         if variables:
@@ -312,7 +312,8 @@ async def wikijs_create_page(
             return json.dumps({"error": rr.get("message", "Unknown error")})
 
     except Exception as e:
-        return json.dumps({"error": str(e)})
+        logger.error("Tool error: %s", e, exc_info=True)
+        raise
 
 
 @mcp.tool()
@@ -375,7 +376,8 @@ async def wikijs_get_page(page_id: int = None, path: str = None, locale: str = "
             })
 
     except Exception as e:
-        return json.dumps({"error": str(e)})
+        logger.error("Tool error: %s", e, exc_info=True)
+        raise
 
 
 
@@ -438,7 +440,8 @@ async def wikijs_get_page_metadata(page_id: int = None, path: str = None, locale
             })
 
     except Exception as e:
-        return json.dumps({"error": str(e)})
+        logger.error("Tool error: %s", e, exc_info=True)
+        raise
 
 @mcp.tool()
 async def wikijs_update_page(
@@ -500,7 +503,8 @@ async def wikijs_update_page(
             return json.dumps({"error": rr.get("message", "Unknown error")})
 
     except Exception as e:
-        return json.dumps({"error": str(e)})
+        logger.error("Tool error: %s", e, exc_info=True)
+        raise
 
 
 @mcp.tool()
@@ -546,7 +550,8 @@ async def wikijs_delete_page(
             return json.dumps({"error": rr.get("message", "Unknown error")})
 
     except Exception as e:
-        return json.dumps({"error": str(e)})
+        logger.error("Tool error: %s", e, exc_info=True)
+        raise
 
 
 @mcp.tool()
@@ -591,7 +596,8 @@ async def wikijs_move_page(
             return json.dumps({"error": rr.get("message", "Unknown error")})
 
     except Exception as e:
-        return json.dumps({"error": str(e)})
+        logger.error("Tool error: %s", e, exc_info=True)
+        raise
 
 
 # ── Search & List ────────────────────────────────────────────────────────────
@@ -633,7 +639,8 @@ async def wikijs_search_pages(query: str, limit: int = 20) -> str:
             return json.dumps({"results": results, "total": total, "query": query})
 
     except Exception as e:
-        return json.dumps({"error": str(e)})
+        logger.error("Tool error: %s", e, exc_info=True)
+        raise
 
 
 @mcp.tool()
@@ -657,7 +664,8 @@ async def wikijs_list_pages(limit: int = 50) -> str:
             return json.dumps({"pages": pages, "count": len(pages)})
 
     except Exception as e:
-        return json.dumps({"error": str(e)})
+        logger.error("Tool error: %s", e, exc_info=True)
+        raise
 
 
 @mcp.tool()
@@ -696,7 +704,8 @@ async def wikijs_get_tree(
             return json.dumps({"tree": tree, "count": len(tree), "root": parent_path or "/"})
 
     except Exception as e:
-        return json.dumps({"error": str(e)})
+        logger.error("Tool error: %s", e, exc_info=True)
+        raise
 
 
 # ── Hierarchical tools ───────────────────────────────────────────────────────
@@ -748,7 +757,8 @@ async def wikijs_get_page_children(page_id: int = None, path: str = None) -> str
         })
 
     except Exception as e:
-        return json.dumps({"error": str(e)})
+        logger.error("Tool error: %s", e, exc_info=True)
+        raise
 
 
 @mcp.tool()
@@ -800,7 +810,8 @@ async def wikijs_create_nested_page(
         return json.dumps(result)
 
     except Exception as e:
-        return json.dumps({"error": str(e)})
+        logger.error("Tool error: %s", e, exc_info=True)
+        raise
 
 
 @mcp.tool()
@@ -858,7 +869,8 @@ async def wikijs_create_repo_structure(
         })
 
     except Exception as e:
-        return json.dumps({"error": str(e)})
+        logger.error("Tool error: %s", e, exc_info=True)
+        raise
 
 
 @mcp.tool()
@@ -943,7 +955,8 @@ async def wikijs_create_documentation_hierarchy(
         })
 
     except Exception as e:
-        return json.dumps({"error": str(e)})
+        logger.error("Tool error: %s", e, exc_info=True)
+        raise
 
 
 # ── Spaces ───────────────────────────────────────────────────────────────────
@@ -964,7 +977,8 @@ async def wikijs_list_spaces() -> str:
         return json.dumps({"spaces": list(spaces.values()), "total": len(spaces)})
 
     except Exception as e:
-        return json.dumps({"error": str(e)})
+        logger.error("Tool error: %s", e, exc_info=True)
+        raise
 
 
 @mcp.tool()
@@ -1063,7 +1077,8 @@ async def wikijs_batch_delete_pages(
         })
 
     except Exception as e:
-        return json.dumps({"error": str(e)})
+        logger.error("Tool error: %s", e, exc_info=True)
+        raise
 
 
 @mcp.tool()
@@ -1105,7 +1120,8 @@ async def wikijs_delete_hierarchy(
         return await wikijs_batch_delete_pages(page_ids=ids, confirm_deletion=True)
 
     except Exception as e:
-        return json.dumps({"error": str(e)})
+        logger.error("Tool error: %s", e, exc_info=True)
+        raise
 
 
 # ── File↔Page mapping ────────────────────────────────────────────────────────
@@ -1142,7 +1158,8 @@ async def wikijs_link_file_to_page(
         return json.dumps({"linked": True, "file_path": file_path, "page_id": page_id, "relationship": relationship})
 
     except Exception as e:
-        return json.dumps({"error": str(e)})
+        logger.error("Tool error: %s", e, exc_info=True)
+        raise
 
 
 @mcp.tool()
@@ -1191,7 +1208,8 @@ async def wikijs_sync_file_docs(
         return json.dumps({"synced": True, "file_path": file_path, "page_id": page_id, "change_summary": change_summary})
 
     except Exception as e:
-        return json.dumps({"error": str(e)})
+        logger.error("Tool error: %s", e, exc_info=True)
+        raise
 
 
 @mcp.tool()
@@ -1252,7 +1270,8 @@ async def wikijs_generate_file_overview(
         return json.dumps(result)
 
     except Exception as e:
-        return json.dumps({"error": str(e)})
+        logger.error("Tool error: %s", e, exc_info=True)
+        raise
 
 
 @mcp.tool()
@@ -1306,7 +1325,8 @@ async def wikijs_bulk_update_project_docs(
         })
 
     except Exception as e:
-        return json.dumps({"error": str(e)})
+        logger.error("Tool error: %s", e, exc_info=True)
+        raise
 
 
 @mcp.tool()
@@ -1334,7 +1354,8 @@ async def wikijs_cleanup_orphaned_mappings() -> str:
         })
 
     except Exception as e:
-        return json.dumps({"error": str(e)})
+        logger.error("Tool error: %s", e, exc_info=True)
+        raise
 
 
 @mcp.tool()
@@ -1361,7 +1382,8 @@ async def wikijs_repository_context() -> str:
         return json.dumps(result)
 
     except Exception as e:
-        return json.dumps({"error": str(e)})
+        logger.error("Tool error: %s", e, exc_info=True)
+        raise
 
 
 # ---------------------------------------------------------------------------
