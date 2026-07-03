@@ -34,10 +34,35 @@ Once connected, you can ask Claude to:
 - A running [Wiki.js](https://js.wiki/) instance (v2.x)
 - A Wiki.js **API key** with Full Access (see [Getting an API key](#-getting-a-wikijs-api-key))
 
-### 1. Clone & setup
+### Install for Claude Code (recommended — via `uvx`)
+
+No clone, no venv. Requires [`uv`](https://docs.astral.sh/uv/) on each Mac. Every user runs the server locally with **their own** Wiki.js API key, so per-user permissions are preserved:
 
 ```bash
-git clone https://github.com/hub2rock/wiki-js-mcp-server.git
+claude mcp add wikijs \
+  --env WIKIJS_URL=https://your-wiki.example.com \
+  --env WIKIJS_API_KEY=your_api_key_here \
+  -- uvx wiki-js-mcp-server@latest
+```
+
+`uvx` fetches the package from PyPI and runs it — nothing to install or maintain. Verify with *"Check my Wiki.js connection status"*; the reply includes a `server_version` field.
+
+**Updates — pick your policy:**
+
+| Config arg | Behaviour |
+|---|---|
+| `uvx wiki-js-mcp-server@latest` | Always newest. Each Claude Code restart re-resolves PyPI and picks up new releases automatically. |
+| `uvx wiki-js-mcp-server@1.1.0` | Pinned. Never changes until you edit the version. |
+| `uvx wiki-js-mcp-server` | Uses whatever `uvx` cached; run `uv cache clean wiki-js-mcp-server` to force a refresh. |
+
+> Because each Mac runs its own process, `WIKIJS_API_KEY` stays per-user — one Mac, one Wiki.js user, one key.
+
+---
+
+### Install from source (Claude Desktop / development)
+
+```bash
+git clone https://github.com/2rock-Inc/wiki-js-mcp-server.git
 cd wiki-js-mcp-server
 chmod +x setup.sh start.sh
 ./setup.sh
@@ -171,8 +196,8 @@ The Docker image is published on Docker Hub — no build required.
 
 ```bash
 mkdir wiki-js-mcp && cd wiki-js-mcp
-curl -O https://raw.githubusercontent.com/hub2rock/wiki-js-mcp-server/main/docker-compose.yml
-curl -O https://raw.githubusercontent.com/hub2rock/wiki-js-mcp-server/main/config/example.env
+curl -O https://raw.githubusercontent.com/2rock-Inc/wiki-js-mcp-server/main/docker-compose.yml
+curl -O https://raw.githubusercontent.com/2rock-Inc/wiki-js-mcp-server/main/config/example.env
 cp example.env .env
 nano .env
 docker compose up -d
@@ -261,6 +286,7 @@ echo -n "user:password" | base64
 | `HTTP_PORT` | `8000` | HTTP listen port |
 | `WIKIJS_MCP_DB` | `./wikijs_mappings.db` | SQLite DB for file↔page mappings |
 | `LOG_FILE` | `./wikijs_mcp.log` | Log file path (**use absolute path in stdio mode**) |
+| `WIKIJS_DEFAULT_LOCALE` | *(empty)* | Locale for created/read pages. Empty = auto-detect the wiki's own default locale; set (e.g. `en`, `fr`) to force one |
 | `LOG_LEVEL` | `INFO` | `DEBUG` / `INFO` / `WARNING` / `ERROR` |
 | `DEFAULT_SPACE_NAME` | `Documentation` | Default space name for new structures |
 
