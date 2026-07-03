@@ -31,6 +31,8 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 
 load_dotenv()
 
+__version__ = "1.1.0"
+
 UTC = ZoneInfo("UTC")
 _MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024  # 5 MB — protection against huge files
 
@@ -52,6 +54,11 @@ class Settings(BaseSettings):
 
     # Local DB (file→page mappings)
     WIKIJS_MCP_DB: str = Field(default="./wikijs_mappings.db")
+
+    # Content
+    # Default content locale for created pages. Empty = auto-detect from the
+    # Wiki.js instance's own default locale (queried once, cached).
+    WIKIJS_DEFAULT_LOCALE: str = Field(default="")
 
     # Misc
     LOG_LEVEL: str = Field(default="INFO")
@@ -213,6 +220,37 @@ def extract_code_structure(file_path: str) -> Dict[str, Any]:
         return {"classes": [], "functions": [], "imports": []}
 
 
+# Cached Wiki.js default content locale (resolved once from the instance).
+_default_locale_cache: Optional[str] = None
+
+
+async def resolve_default_locale(c: "WikiJSClient", override: Optional[str] = None) -> str:
+    """Resolve the content locale to use for a page operation.
+
+    Precedence: explicit ``override`` → ``WIKIJS_DEFAULT_LOCALE`` setting →
+    the Wiki.js instance's own default locale (queried once and cached) → ``en``.
+
+    This avoids hard-coding ``en``, which would otherwise create/read pages in
+    the wrong locale on wikis whose default locale is not English.
+    """
+    if override:
+        return override
+    if settings.WIKIJS_DEFAULT_LOCALE:
+        return settings.WIKIJS_DEFAULT_LOCALE
+    global _default_locale_cache
+    if _default_locale_cache:
+        return _default_locale_cache
+    try:
+        data = await c.query("query{localization{config{locale}}}")
+        loc = data.get("localization", {}).get("config", {}).get("locale")
+        _default_locale_cache = loc or "en"
+        logger.info(f"Resolved Wiki.js default locale: {_default_locale_cache}")
+    except Exception as e:
+        logger.warning(f"Could not resolve Wiki.js default locale, falling back to 'en': {e}")
+        _default_locale_cache = "en"
+    return _default_locale_cache
+
+
 # ---------------------------------------------------------------------------
 # FastMCP Server
 # ---------------------------------------------------------------------------
@@ -233,6 +271,7 @@ async def wikijs_connection_status() -> str:
             "authenticated": True,
             "api_url": settings.WIKIJS_URL,
             "graphql_url": settings.graphql_url,
+            "server_version": __version__,
             "status": "healthy",
         })
     except Exception as e:
@@ -240,6 +279,7 @@ async def wikijs_connection_status() -> str:
             "connected": False,
             "error": str(e),
             "api_url": settings.WIKIJS_URL,
+            "server_version": __version__,
             "status": "connection_failed",
         })
 
@@ -254,6 +294,7 @@ async def wikijs_create_page(
     description: str = "",
     tags: List[str] = None,
     parent_id: int = None,
+    locale: str = None,
 ) -> str:
     """
     Create a new Wiki.js page.
@@ -265,9 +306,11 @@ async def wikijs_create_page(
         description: Short description (optional)
         tags: List of tags (optional)
         parent_id: Parent page ID — path will be prefixed with parent path (optional)
+        locale: Content locale (optional). Defaults to the wiki's default locale.
     """
     try:
         async with WikiJSClient() as c:
+            loc = await resolve_default_locale(c, locale)
             if not path:
                 if parent_id:
                     pr = await c.query(
@@ -298,7 +341,7 @@ async def wikijs_create_page(
                 "editor": "markdown",
                 "isPublished": True,
                 "isPrivate": False,
-                "locale": "en",
+                "locale": loc,
                 "path": path,
                 "tags": tags or [],
                 "title": title,
@@ -316,14 +359,14 @@ async def wikijs_create_page(
 
 
 @mcp.tool()
-async def wikijs_get_page(page_id: int = None, path: str = None, locale: str = "en", include_content: bool = True, max_content_chars: int = 800000) -> str:
+async def wikijs_get_page(page_id: int = None, path: str = None, locale: str = None, include_content: bool = True, max_content_chars: int = 800000) -> str:
     """
     Get a Wiki.js page by ID or path.
 
     Args:
         page_id: Page ID (use either page_id OR path)
         path: Page path e.g. 'infra/proxmox' (use either page_id OR path)
-        locale: Locale (default: en)
+        locale: Locale (default: the wiki's default locale)
         include_content: Include page content (default: True). Set False for metadata only.
         max_content_chars: Truncate content at this many chars (default: 800000 ~800KB).
     """
@@ -344,7 +387,8 @@ async def wikijs_get_page(page_id: int = None, path: str = None, locale: str = "
                     id path title content description isPublished locale
                     createdAt updatedAt editor authorName tags{tag}
                 }}}"""
-                data = await c.query(q, {"path": path, "locale": locale})
+                loc = await resolve_default_locale(c, locale)
+                data = await c.query(q, {"path": path, "locale": loc})
                 pg = data.get("pages", {}).get("singleByPath")
 
             if not pg:
@@ -381,7 +425,7 @@ async def wikijs_get_page(page_id: int = None, path: str = None, locale: str = "
 
 
 @mcp.tool()
-async def wikijs_get_page_metadata(page_id: int = None, path: str = None, locale: str = "en") -> str:
+async def wikijs_get_page_metadata(page_id: int = None, path: str = None, locale: str = None) -> str:
     """
     Get page metadata only — no content. Fast and always within size limits.
     Use this when wikijs_get_page fails due to page size (large images, etc.)
@@ -389,7 +433,7 @@ async def wikijs_get_page_metadata(page_id: int = None, path: str = None, locale
     Args:
         page_id: Page ID (use either page_id OR path)
         path: Page path (use either page_id OR path)
-        locale: Locale (default: en)
+        locale: Locale (default: the wiki's default locale)
     """
     try:
         if not page_id and not path:
@@ -410,7 +454,8 @@ async def wikijs_get_page_metadata(page_id: int = None, path: str = None, locale
                     createdAt updatedAt editor authorName tags{tag}
                     content
                 }}}"""
-                data = await c.query(q, {"path": path, "locale": locale})
+                loc = await resolve_default_locale(c, locale)
+                data = await c.query(q, {"path": path, "locale": loc})
                 pg = data.get("pages", {}).get("singleByPath")
 
             if not pg:
@@ -553,7 +598,7 @@ async def wikijs_delete_page(
 async def wikijs_move_page(
     page_id: int,
     destination_path: str,
-    destination_locale: str = "en",
+    destination_locale: str = None,
 ) -> str:
     """
     Move a Wiki.js page to a new path.
@@ -561,7 +606,7 @@ async def wikijs_move_page(
     Args:
         page_id: ID of the page to move
         destination_path: New path (e.g. 'infra/archive/old-page')
-        destination_locale: New locale (default: en)
+        destination_locale: New locale (default: the wiki's default locale)
     """
     try:
         current_raw = await wikijs_get_page(page_id=page_id)
@@ -570,6 +615,7 @@ async def wikijs_move_page(
             return current_raw
 
         async with WikiJSClient() as c:
+            destination_locale = await resolve_default_locale(c, destination_locale)
             data = await c.query(
                 """mutation($id:Int!,$destinationPath:String!,$destinationLocale:String!){
                     pages{move(id:$id,destinationPath:$destinationPath,destinationLocale:$destinationLocale){
@@ -609,11 +655,12 @@ async def wikijs_search_pages(query: str, limit: int = 20) -> str:
     try:
         async with WikiJSClient() as c:
             try:
+                loc = await resolve_default_locale(c)
                 data = await c.query(
-                    """query($query:String!){pages{search(query:$query,path:"",locale:"en"){
+                    """query($query:String!,$locale:String!){pages{search(query:$query,path:"",locale:$locale){
                         results{id title description path locale} totalHits
                     }}}""",
-                    {"query": query},
+                    {"query": query, "locale": loc},
                 )
                 results = data.get("pages", {}).get("search", {}).get("results", [])[:limit]
                 total = data.get("pages", {}).get("search", {}).get("totalHits", len(results))
@@ -664,7 +711,7 @@ async def wikijs_list_pages(limit: int = 50) -> str:
 async def wikijs_get_tree(
     parent_path: str = "",
     mode: str = "ALL",
-    locale: str = "en",
+    locale: str = None,
     parent_id: int = None,
 ) -> str:
     """
@@ -673,11 +720,12 @@ async def wikijs_get_tree(
     Args:
         parent_path: Root path to start from (empty = full tree)
         mode: ALL | FOLDERS | PAGES (default: ALL)
-        locale: Locale filter (default: en)
+        locale: Locale filter (default: the wiki's default locale)
         parent_id: Parent page ID (optional)
     """
     try:
         async with WikiJSClient() as c:
+            locale = await resolve_default_locale(c, locale)
             data = await c.query(
                 """query($path:String,$parent:Int,$mode:PageTreeMode!,$locale:String!,$includeAncestors:Boolean){
                     pages{tree(path:$path,parent:$parent,mode:$mode,locale:$locale,includeAncestors:$includeAncestors){
@@ -757,6 +805,7 @@ async def wikijs_create_nested_page(
     content: str,
     parent_path: str,
     create_parent_if_missing: bool = True,
+    locale: str = None,
 ) -> str:
     """
     Create a page nested under a given path, creating parent pages if needed.
@@ -766,9 +815,10 @@ async def wikijs_create_nested_page(
         content: Markdown content
         parent_path: Full parent path (e.g. 'infra/proxmox')
         create_parent_if_missing: Auto-create missing parent pages
+        locale: Content locale (optional). Defaults to the wiki's default locale.
     """
     try:
-        parent_raw = await wikijs_get_page(path=parent_path)
+        parent_raw = await wikijs_get_page(path=parent_path, locale=locale)
         parent = json.loads(parent_raw)
 
         if "error" in parent:
@@ -779,7 +829,7 @@ async def wikijs_create_nested_page(
             current = ""
             for part in parts:
                 current = f"{current}/{part}".lstrip("/")
-                check_raw = await wikijs_get_page(path=current)
+                check_raw = await wikijs_get_page(path=current, locale=locale)
                 check = json.loads(check_raw)
                 if "error" in check:
                     part_title = part.replace("-", " ").title()
@@ -787,12 +837,13 @@ async def wikijs_create_nested_page(
                         title=part_title,
                         content=f"# {part_title}\n\n*Auto-created section.*",
                         path=current,
+                        locale=locale,
                     ))
                     if "error" in cr:
                         return json.dumps({"error": f"Failed to create parent '{current}': {cr['error']}"})
 
         full_path = f"{parent_path}/{slugify(title)}"
-        result_raw = await wikijs_create_page(title=title, content=content, path=full_path)
+        result_raw = await wikijs_create_page(title=title, content=content, path=full_path, locale=locale)
         result = json.loads(result_raw)
         if "error" not in result:
             result["parent_path"] = parent_path
@@ -808,6 +859,7 @@ async def wikijs_create_repo_structure(
     repo_name: str,
     description: str = None,
     sections: List[str] = None,
+    locale: str = None,
 ) -> str:
     """
     Create a complete documentation structure for a repository/project.
@@ -816,6 +868,7 @@ async def wikijs_create_repo_structure(
         repo_name: Repository name (becomes root page)
         description: Short description of the project
         sections: Section names to create (default: Overview, Architecture, API, Development, Deployment)
+        locale: Content locale (optional). Defaults to the wiki's default locale.
     """
     try:
         if not sections:
@@ -829,7 +882,7 @@ async def wikijs_create_repo_structure(
             f"---\n*Generated by wiki-js-mcp-server*"
         )
 
-        root_raw = await wikijs_create_page(title=repo_name, content=root_content, path=root_path)
+        root_raw = await wikijs_create_page(title=repo_name, content=root_content, path=root_path, locale=locale)
         root = json.loads(root_raw)
         if "error" in root:
             return root_raw
@@ -842,7 +895,7 @@ async def wikijs_create_repo_structure(
                 f"*Documentation for {repo_name} — {section} section.*\n\n"
                 f"---\n[← Back to {repo_name}]({root_path})"
             )
-            sec_raw = await wikijs_create_page(title=section, content=sec_content, path=sec_path)
+            sec_raw = await wikijs_create_page(title=section, content=sec_content, path=sec_path, locale=locale)
             sec = json.loads(sec_raw)
             if "error" not in sec:
                 created.append(sec)
@@ -866,6 +919,7 @@ async def wikijs_create_documentation_hierarchy(
     project_name: str,
     file_mappings: List[Dict[str, str]],
     auto_organize: bool = True,
+    locale: str = None,
 ) -> str:
     """
     Build a full documentation hierarchy for a project from a list of files.
@@ -874,6 +928,7 @@ async def wikijs_create_documentation_hierarchy(
         project_name: Project name (root page)
         file_mappings: List of {"file_path": "src/foo.py"} dicts
         auto_organize: Auto-categorize files into components/api/utils/etc.
+        locale: Content locale (optional). Defaults to the wiki's default locale.
     """
     try:
         buckets: Dict[str, List] = {
@@ -904,7 +959,7 @@ async def wikijs_create_documentation_hierarchy(
             buckets["other"] = file_mappings
 
         active_sections = [k.title() for k, v in buckets.items() if v]
-        repo_raw = await wikijs_create_repo_structure(project_name, sections=active_sections)
+        repo_raw = await wikijs_create_repo_structure(project_name, sections=active_sections, locale=locale)
         repo = json.loads(repo_raw)
         if "error" in repo:
             return repo_raw
@@ -920,6 +975,7 @@ async def wikijs_create_documentation_hierarchy(
                     title=page_title,
                     content=f"# {page_title}\n\n**File:** `{fp}`\n\n*Auto-generated.*",
                     parent_path=parent,
+                    locale=locale,
                 )
                 ov = json.loads(ov_raw)
                 if "error" not in ov:
@@ -1371,7 +1427,7 @@ async def wikijs_repository_context() -> str:
 async def run_http() -> None:
     """Run as HTTP server (Docker/remote)."""
     settings.validate_config()
-    logger.info(f"wiki-js-mcp-server HTTP mode — {settings.HTTP_HOST}:{settings.HTTP_PORT}")
+    logger.info(f"wiki-js-mcp-server v{__version__} HTTP mode — {settings.HTTP_HOST}:{settings.HTTP_PORT}")
     app = mcp.http_app()
     config = uvicorn.Config(app=app, host=settings.HTTP_HOST, port=settings.HTTP_PORT, log_level="info")
     server = uvicorn.Server(config)
@@ -1381,7 +1437,7 @@ async def run_http() -> None:
 async def run_stdio() -> None:
     """Run as stdio server (Claude Desktop local)."""
     settings.validate_config()
-    logger.info("wiki-js-mcp-server stdio mode")
+    logger.info(f"wiki-js-mcp-server v{__version__} stdio mode")
     await mcp.run_stdio_async()
 
 

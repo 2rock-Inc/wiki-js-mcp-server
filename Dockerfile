@@ -2,7 +2,7 @@ FROM python:3.12-slim
 
 LABEL org.opencontainers.image.title="wiki-js-mcp-server" \
       org.opencontainers.image.description="MCP server for Wiki.js" \
-      org.opencontainers.image.source="https://github.com/hub2rock/wiki-js-mcp-server" \
+      org.opencontainers.image.source="https://github.com/2rock-Inc/wiki-js-mcp-server" \
       org.opencontainers.image.licenses="MIT"
 
 ENV PYTHONUNBUFFERED=1 \
