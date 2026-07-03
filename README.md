@@ -57,6 +57,8 @@ claude mcp add wikijs \
 
 > Because each Mac runs its own process, `WIKIJS_API_KEY` stays per-user — one Mac, one Wiki.js user, one key.
 
+> **Already have a git-clone install?** See [docs/MIGRATION-uvx.md](docs/MIGRATION-uvx.md) to switch to `uvx` — step-by-step for macOS/Linux **and Windows**.
+
 ---
 
 ### Install from source (Claude Desktop / development)
